@@ -22,6 +22,17 @@ export default function Investments() {
   const [open, setOpen] = useState<string | null>(null);
   const savings = state.accounts.filter((a) => !a.archived && a.kind === 'savings');
   const list = state.investments.filter((i) => !i.archived);
+  const firstChecking = state.accounts.find((a) => !a.archived && a.kind === 'checking')?.id ?? '';
+
+  const movePreset = () => {
+    if (!move) return {};
+    const inv = state.investments.find((i) => i.id === move.id);
+    const acc = state.accounts.find((a) => a.id === move.id);
+    const name = inv?.name ?? acc?.name ?? '';
+    return move.type === 'application'
+      ? { description: inv ? `Aplicação — ${name}` : `Guardar em ${name}`, fromAccountId: firstChecking || null, ...(inv ? { investmentId: inv.id } : { toAccountId: move.id }) }
+      : { description: inv ? `Resgate — ${name}` : `Resgatar de ${name}`, toAccountId: firstChecking || null, ...(inv ? { investmentId: inv.id } : { fromAccountId: move.id }) };
+  };
 
   const remove = async (i: Investment) => {
     const hasTx = state.transactions.some((t) => t.investmentId === i.id);
@@ -108,13 +119,7 @@ export default function Investments() {
 
       {edit && <InvestmentForm inv={edit === 'new' ? null : edit} onClose={() => setEdit(null)} />}
       {value && <ValueForm inv={value} current={inv[value.id].value} onClose={() => setValue(null)} />}
-      {move && (
-        <TransactionForm
-          presetType={move.type}
-          preset={state.investments.some((i) => i.id === move.id) ? { investmentId: move.id } : move.type === 'application' ? { toAccountId: move.id } : { fromAccountId: move.id }}
-          onClose={() => setMove(null)}
-        />
-      )}
+      {move && <TransactionForm presetType={move.type} preset={movePreset()} onClose={() => setMove(null)} />}
     </div>
   );
 }

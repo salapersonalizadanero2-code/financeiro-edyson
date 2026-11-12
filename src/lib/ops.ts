@@ -58,6 +58,11 @@ export function validateTx(state: AppState, t: TxInput, excludeId?: string): voi
       if (!hist) needs(t.toAccountId, 'a conta que receberá o resgate');
       if (!hist && !!t.fromAccountId === !!t.investmentId) fail('Escolha a origem do resgate: um investimento OU uma caixinha/conta.');
       if (t.fromAccountId && t.fromAccountId === t.toAccountId) fail('Origem e destino não podem ser a mesma conta.');
+      if (!hist && t.investmentId) {
+        const inv = state.investments.find((i) => i.id === t.investmentId);
+        if (inv?.status === 'pending_confirmation')
+          fail(`A posição de "${inv.name}" ainda não foi confirmada. Informe o valor atual do investimento antes de registrar resgates — assim nenhum saldo é inventado.`);
+      }
       break;
     case 'adjustment':
       needs(t.toAccountId, 'a conta a ajustar');
@@ -135,7 +140,29 @@ export function updateTransaction(state: AppState, id: string, input: TxInput): 
   const t = cleanTx(input);
   validateTx(state, t, id);
   if (t.refId && state.transactions.some((x) => x.id !== id && x.refId === t.refId && x.status !== 'pending')) fail('Receita já confirmada em outro lançamento.');
+  if (t.status !== 'pending' && t.obligationId && t.installmentNo != null) {
+    const clash = state.transactions.some(
+      (x) => x.id !== id && x.obligationId === t.obligationId && x.installmentNo === t.installmentNo && x.status !== 'pending',
+    );
+    if (clash) fail('Esta parcela já está quitada por outro lançamento e não pode ser paga novamente.');
+  }
   return { ...state, transactions: state.transactions.map((x) => (x.id === id ? { ...t, id, createdAt: x.createdAt } : x)) };
+}
+
+/** Confirma um lançamento pendente: só então ele passa a movimentar o saldo. */
+export function confirmPendingTx(state: AppState, id: string): AppState {
+  const t = state.transactions.find((x) => x.id === id);
+  if (!t) return fail('Lançamento não encontrado.');
+  if (t.status !== 'pending') return fail('Este lançamento já está confirmado.');
+  const next = { ...t, status: 'confirmed' as const };
+  validateTx(state, next, id);
+  if (t.obligationId && t.installmentNo != null) {
+    const ref = findObligation(state, t.obligationId);
+    if (!ref) return fail('Dívida/contrato não encontrado.');
+    if (obligationProgress(state, ref.ob).paidNos.has(t.installmentNo))
+      fail('Esta parcela já está quitada e não pode ser paga novamente.');
+  }
+  return { ...state, transactions: state.transactions.map((x) => (x.id === id ? next : x)) };
 }
 
 export function deleteTransaction(state: AppState, id: string): AppState {

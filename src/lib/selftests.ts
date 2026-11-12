@@ -1,7 +1,8 @@
 import type { Account, AppState } from './types';
 import { blankTx, createEmptyState, createSeedState } from './seed';
 import {
-  addTransaction, confirmIncome, exportBackup, normalizeState, payInstallment, saveDebt, undoInstallment,
+  addTransaction, confirmIncome, confirmPendingTx, deleteTransaction, exportBackup, normalizeState, payInstallment, saveDebt,
+  undoInstallment, updateTransaction,
 } from './ops';
 import { balancesMap, computeTotals, debtTotals, findObligation, obligationBalance, obligationProgress } from './selectors';
 
@@ -85,6 +86,26 @@ export function runSelfTests(): TestResult[] {
     return throws(() => addTransaction(s, blankTx({ type: 'expense', description: 'x', amount: 250, date: '2026-11-10', fromAccountId: 'acc-inter-cx' }))) ? true : 'permitiu gastar valor bloqueado';
   });
 
+  t('Resgate da caixinha usa só o disponível e não altera o patrimônio', () => {
+    const s = createSeedState();
+    s.settings.simulatedDate = '2026-11-10';
+    if (!throws(() => addTransaction(s, blankTx({ type: 'redemption', description: 'x', amount: 250, date: '2026-11-10', fromAccountId: 'acc-inter-cx', toAccountId: 'acc-inter' }))))
+      return 'permitiu resgatar valor bloqueado';
+    const s2 = addTransaction(s, blankTx({ type: 'redemption', description: 'Resgate', amount: 100, date: '2026-11-10', fromAccountId: 'acc-inter-cx', toAccountId: 'acc-inter' }));
+    const b = balancesMap(s2);
+    return computeTotals(s2, '2026-11-10').patrimony === 801.34 && b['acc-inter-cx'] === 187.9 && b['acc-inter'] === 412.5
+      ? true : 'saldos ou patrimônio incorretos';
+  });
+
+  t('Guardar na caixinha (aplicação) não altera o patrimônio', () => {
+    const s = createSeedState();
+    s.settings.simulatedDate = '2026-11-10';
+    const s2 = addTransaction(s, blankTx({ type: 'application', description: 'Guardar', amount: 100, date: '2026-11-10', fromAccountId: 'acc-inter', toAccountId: 'acc-inter-cx' }));
+    const b = balancesMap(s2);
+    return computeTotals(s2, '2026-11-10').patrimony === 801.34 && b['acc-inter'] === 212.5 && b['acc-inter-cx'] === 387.9
+      ? true : 'patrimônio mudou ou saldos incorretos';
+  });
+
   t('Parcela de R$ 50: saldo −50, parcela paga, saldo devedor atualizado, 2º pagamento bloqueado', () => {
     let s = base();
     s = saveDebt(s, {
@@ -133,6 +154,38 @@ export function runSelfTests(): TestResult[] {
       computeTotals(r, '2026-11-10').patrimony === computeTotals(s, '2026-11-10').patrimony;
     const viaLS = normalizeState(JSON.parse(JSON.stringify(s)));
     return same && viaLS.transactions.length === s.transactions.length ? true : 'dados divergentes após restauração';
+  });
+
+  t('Lançamento pendente não movimenta saldo; ao confirmar, movimenta uma única vez', () => {
+    let s = addTransaction(base(), blankTx({ type: 'expense', description: 'Pendente', amount: 25, date: '2026-11-10', fromAccountId: 'A', status: 'pending' }));
+    if (balancesMap(s).A !== 100) return 'pendente alterou o saldo';
+    const id = s.transactions[0].id;
+    s = confirmPendingTx(s, id);
+    if (balancesMap(s).A !== 75) return `saldo após confirmar: ${balancesMap(s).A}`;
+    return throws(() => confirmPendingTx(s, id)) ? true : 'permitiu confirmar duas vezes';
+  });
+
+  t('Investimento com posição pendente não aceita resgate (nada é inventado)', () => {
+    let s = base();
+    s.investments = [{ id: 'P', name: 'CDB pendente', institution: '', type: 'CDB', baseValue: null, appliedBase: null, applicationDate: null, yieldInfo: '', maturityDate: null, liquidity: '', status: 'pending_confirmation', notes: '' }];
+    return throws(() => addTransaction(s, blankTx({ type: 'redemption', description: 'Resgate', amount: 10, date: '2026-11-10', investmentId: 'P', toAccountId: 'A' })))
+      ? true : 'permitiu resgatar posição não confirmada';
+  });
+
+  t('Valores não classificados continuam como “A classificar” até a confirmação', () => {
+    let s = addTransaction(base(), blankTx({ type: 'income', description: 'Recebimento desconhecido', amount: 30, date: '2026-11-10', toAccountId: 'A', status: 'to_classify' }));
+    if (s.transactions[0].status !== 'to_classify' || s.transactions[0].categoryId !== null) return 'classificou automaticamente';
+    return balancesMap(s).A === 130 ? true : 'valor não entrou no saldo';
+  });
+
+  t('Editar lançamento recalcula o saldo; excluir estorna corretamente', () => {
+    let s = addTransaction(base(), blankTx({ type: 'expense', description: 'Editável', amount: 20, date: '2026-11-10', fromAccountId: 'A' }));
+    const id = s.transactions[0].id;
+    if (balancesMap(s).A !== 80) return 'saldo inicial incorreto';
+    s = updateTransaction(s, id, { ...s.transactions[0], amount: 30 });
+    if (balancesMap(s).A !== 70) return `após editar: ${balancesMap(s).A}`;
+    s = deleteTransaction(s, id);
+    return balancesMap(s).A === 100 ? true : `após excluir: ${balancesMap(s).A}`;
   });
 
   t('Validações: valor zero, data inválida e transferência para a mesma conta são recusados', () => {

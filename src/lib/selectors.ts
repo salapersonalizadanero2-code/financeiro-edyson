@@ -364,8 +364,8 @@ export function limitStatus(state: AppState, ym: string) {
 // ====================== Evolução do patrimônio ======================
 export function patrimonySeries(state: AppState, today: string) {
   const base =
-    state.accounts.reduce((s, a) => s + a.openingBalance, 0) +
-    state.investments.reduce((s, i) => s + (i.baseValue ?? 0), 0);
+    state.accounts.filter((a) => !a.archived).reduce((s, a) => s + a.openingBalance, 0) +
+    state.investments.filter((i) => !i.archived).reduce((s, i) => s + (i.baseValue ?? 0), 0);
   const eff = state.transactions.filter((t) => isEffective(t) && netWorthDelta(t) !== 0);
   let startYm = ymOf(state.openingDate);
   let endYm = ymOf(today);

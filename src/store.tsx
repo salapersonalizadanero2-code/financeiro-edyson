@@ -50,8 +50,8 @@ export function useApp(): Ctx {
 const PAGES = ['dashboard', 'contas', 'lancamentos', 'receitas', 'categorias', 'dividas', 'contratos', 'investimentos', 'metas', 'planejamento', 'relatorios', 'configuracoes'];
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const initial = useRef(load());
-  const [state, setState] = useState<AppState>(initial.current.state);
+  const [initial] = useState(load);
+  const [state, setState] = useState<AppState>(initial.state);
   const stateRef = useRef(state);
   const [clock, setClock] = useState(todayISO());
   const [ym, setYm] = useState(() => todayISO().slice(0, 7));
@@ -114,7 +114,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (initial.current.notice) toast(initial.current.notice, 'error');
+    if (initial.notice) toast(initial.notice, 'error');
   }, [toast]);
 
   const go = useCallback((p: string) => {
@@ -140,7 +140,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const today = state.settings.simulatedDate ?? clock;
 
   const value = useMemo<Ctx>(
-    () => ({ state, today, ym, setYm, page, go, commit, replaceState, toast, confirm, storageNotice: initial.current.notice }),
+    () => ({ state, today, ym, setYm, page, go, commit, replaceState, toast, confirm, storageNotice: initial.notice }),
     [state, today, ym, page, go, commit, replaceState, toast, confirm],
   );
 

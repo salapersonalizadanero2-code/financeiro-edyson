@@ -148,10 +148,11 @@ function BidForm({ contract, onClose, today }: { contract: Contract; onClose: ()
 }
 
 function AmortForm({ contract, onClose }: { contract: Contract; onClose: () => void }) {
-  const { today, commit } = useApp();
+  const { state, today, commit } = useApp();
   const [date, setDate] = useState(today);
   const [amount, setAmount] = useState('');
-  const [acc, setAcc] = useState(contract.accountId ?? '');
+  const fallback = state.accounts.find((a) => !a.archived && a.kind === 'checking')?.id ?? '';
+  const [acc, setAcc] = useState(contract.accountId ?? fallback);
   const [note, setNote] = useState('');
   return (
     <Modal open onClose={onClose} title={`Amortização — ${contract.name}`} footer={<><button className="btn-ghost" onClick={onClose}>Cancelar</button><button className="btn-primary" onClick={() => { if (commit((s) => amortize(s, { contractId: contract.id, amount: parseMoney(amount), date, accountId: acc, note }), 'Amortização registrada — saldo da conta e do contrato atualizados.')) onClose(); }}>Registrar</button></>}>

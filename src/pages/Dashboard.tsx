@@ -7,11 +7,11 @@ import {
 } from 'lucide-react';
 import { useApp } from '../store';
 import {
-  categoryName, computeTotals, debtTotals, goalAccumulated, investmentMap, monthSeries, monthStats, nextUnlock, patrimonySeries,
-  statementCheck, upcomingDues,
+  categoryName, computeTotals, debtTotals, goalAccumulated, investmentMap, limitStatus, monthSeries, monthStats, nextUnlock,
+  patrimonySeries, statementCheck, upcomingDues,
 } from '../lib/selectors';
 import { brl, daysDiff, fmtDate, monthLong, pct } from '../lib/utils';
-import { Badge, CHART_COLORS, Card, Empty, MoneyTooltip, Notice, PageHeader, Progress, Stat } from '../components/ui';
+import { Badge, CHART_COLORS, Card, Empty, MoneyTooltip, PageHeader, Progress, Stat } from '../components/ui';
 import { TxItem } from '../components/TxItem';
 
 export default function Dashboard() {
@@ -34,12 +34,29 @@ export default function Dashboard() {
   const catData = Object.entries(stats.byCategory)
     .map(([id, value]) => ({ name: id === 'none' ? 'A classificar' : categoryName(state.categories, id), value }))
     .sort((a, b) => b.value - a.value);
-  const goalData = state.goals.map((g) => ({ name: g.name, pct: Math.min(100, Math.round((goalAccumulated(g) / g.target) * 100)), acumulado: goalAccumulated(g), meta: g.target }));
+  const goalData = state.goals.map((g) => {
+    const acumulado = goalAccumulated(g);
+    return {
+      name: g.name,
+      pct: g.target > 0 ? Math.min(100, Math.round((acumulado / g.target) * 100)) : 0,
+      acumulado,
+      meta: g.target,
+      falta: Math.max(0, g.target - acumulado),
+    };
+  });
+  const limitAlerts = limitStatus(state, ym).filter((l) => l.level === 'warn' || l.level === 'over');
+
 
   const recent = [...state.transactions].filter((t) => t.status !== 'pending').sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt)).slice(0, 6);
   const toClassify = state.transactions.filter((t) => t.status === 'to_classify').length;
   const divergences = state.statements.filter((s) => !statementCheck(state, s).ok).length;
   const pendingInv = state.investments.filter((i) => !i.archived && i.status === 'pending_confirmation');
+  const attention: Array<{ key: string; text: string; page: string; label: string }> = [];
+  if (toClassify > 0) attention.push({ key: 'classificar', text: `${toClassify} lançamento(s) estão como “A classificar”.`, page: 'lancamentos', label: 'Classificar' });
+  if (pendingInv.length > 0) attention.push({ key: 'investimento', text: `${pendingInv.map((i) => i.name).join(', ')} com posição pendente de confirmação — o valor não é estimado nem entra no patrimônio até você informar.`, page: 'investimentos', label: 'Informar valor' });
+  if (divergences > 0) attention.push({ key: 'extratos', text: `${divergences} extrato(s) informado(s) com divergência a conferir.`, page: 'relatorios', label: 'Ver conferência' });
+  if (limitAlerts.length > 0) attention.push({ key: 'limites', text: `${limitAlerts.length} categoria(s) perto ou acima do limite: ${limitAlerts.slice(0, 3).map((l) => `${l.category.name} (${Math.round(l.ratio * 100)}%)`).join(', ')}.`, page: 'categorias', label: 'Ver categorias' });
+
   const caixinha = state.accounts.find((a) => !a.archived && a.blocks.length > 0 && nextUnlock(a, today));
   const unlock = caixinha ? nextUnlock(caixinha, today) : null;
   const monthBalance = stats.income - stats.expense;
@@ -49,16 +66,23 @@ export default function Dashboard() {
     <div>
       <PageHeader title="Visão geral" subtitle={`Resumo da sua situação financeira · referência: ${monthLong(ym)}`} />
 
-      <div className="mb-4 grid gap-2.5">
-        {toClassify > 0 && (
-          <Notice tone="brand">
-            <b>{toClassify}</b> lançamento(s) estão como <b>A classificar</b>. <button className="cursor-pointer font-semibold underline" onClick={() => go('lancamentos')}>Classificar agora</button>
-          </Notice>
-        )}
-        {pendingInv.length > 0 && <Notice>Posição de <b>{pendingInv.map((i) => i.name).join(', ')}</b> pendente de confirmação — o valor não foi estimado e não entra no patrimônio. <button className="cursor-pointer font-semibold underline" onClick={() => go('investimentos')}>Informar valor</button></Notice>}
-        {divergences > 0 && <Notice>Há <b>{divergences}</b> extrato(s) informado(s) com divergência a conferir. <button className="cursor-pointer font-semibold underline" onClick={() => go('relatorios')}>Ver conferência</button></Notice>}
-      </div>
+      {attention.length > 0 && (
+        <div className="mb-4 rounded-xl border border-warn/30 bg-warn/5 px-3.5 py-3">
+          <div className="flex items-center gap-2 text-sm font-bold text-warn">
+            <AlertTriangle className="h-4 w-4" /> Pontos de atenção
+          </div>
+          <ul className="mt-1.5 space-y-1">
+            {attention.map((a) => (
+              <li key={a.key} className="flex flex-wrap items-baseline gap-x-2 text-sm">
+                <span className="text-ink/90">• {a.text}</span>
+                <button className="cursor-pointer font-semibold text-brand underline dark:text-brand-soft" onClick={() => go(a.page)}>{a.label} →</button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
+      <h2 className="mb-2 text-xs font-bold tracking-wide text-muted uppercase">Patrimônio e compromissos</h2>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Patrimônio total" value={brl(totals.patrimony)} icon={<Wallet className="h-4 w-4" />} sub="Disponível + bloqueado + investimentos" />
         <Stat label="Saldo disponível" value={brl(totals.available)} tone="ok" icon={<Banknote className="h-4 w-4" />} sub="Pode ser usado agora" />
@@ -68,10 +92,13 @@ export default function Dashboard() {
         <Stat label="Total de dívidas" value={brl(debts.owe)} tone={debts.owe > 0 ? 'bad' : 'brand'} icon={<CreditCard className="h-4 w-4" />} sub={debts.clarify > 0 ? `+ ${brl(debts.clarify)} a esclarecer` : 'Saldo devedor atual'} onClick={() => go('dividas')} />
         <Stat label="Parcelas futuras" value={brl(debts.futureAmount)} tone="warn" icon={<CalendarClock className="h-4 w-4" />} sub={`${debts.futureCount} parcela(s) restante(s)`} onClick={() => go('dividas')} />
         <Stat label="Reserva de emergência" value={pct(emPct, 1)} icon={<ShieldCheck className="h-4 w-4" />} sub={emergency ? `${brl(emAcc)} de ${brl(emergency.target)}` : 'Meta não cadastrada'} onClick={() => go('metas')} />
+      </div>
+
+      <h2 className="mt-5 mb-2 text-xs font-bold tracking-wide text-muted uppercase">Mês de {monthLong(ym)}</h2>
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
         <Stat label="Receitas do mês" value={brl(stats.income)} tone="ok" icon={<TrendingUp className="h-4 w-4" />} sub={stats.toClassify > 0 ? `${brl(stats.toClassify)} a classificar` : 'Recebidas'} />
         <Stat label="Despesas do mês" value={brl(stats.expense)} tone="bad" icon={<TrendingDown className="h-4 w-4" />} sub="Inclui parcelas pagas" />
         <Stat label="Saldo mensal" value={brl(monthBalance)} tone={monthBalance >= 0 ? 'ok' : 'bad'} icon={<Wallet className="h-4 w-4" />} sub="Receitas − despesas" />
-        <Stat label="Transferências / aplicações" value={brl(stats.transfers + stats.invested)} icon={<PiggyBank className="h-4 w-4" />} sub="Não são receita nem despesa" />
       </div>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
@@ -159,19 +186,34 @@ export default function Dashboard() {
           ) : <Empty>Nenhuma despesa registrada neste mês.</Empty>}
         </Card>
 
-        <Card title="Evolução das metas financeiras" className="lg:col-span-2">
+        <Card title="Evolução das metas financeiras" action={<button className="text-xs font-semibold text-brand" onClick={() => go('metas')}>Ver metas</button>} className="lg:col-span-2">
           {goalData.length ? (
-            <div className="grid gap-3 sm:grid-cols-3">
-              {goalData.map((g) => (
-                <div key={g.name} className="rounded-xl bg-tint/60 p-3">
-                  <div className="flex items-baseline justify-between gap-2">
-                    <span className="truncate text-sm font-semibold">{g.name}</span>
-                    <span className="text-sm font-bold text-brand dark:text-brand-soft">{g.pct}%</span>
-                  </div>
-                  <div className="my-2"><Progress value={g.pct} /></div>
-                  <div className="text-xs text-muted">{brl(g.acumulado)} de {brl(g.meta)}</div>
-                </div>
-              ))}
+            <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
+              <div className="h-56">
+                <ResponsiveContainer>
+                  <BarChart data={goalData} layout="vertical" margin={{ left: 6, right: 12, top: 4 }} barSize={16}>
+                    <CartesianGrid horizontal={false} />
+                    <XAxis type="number" tickLine={false} axisLine={false} />
+                    <YAxis type="category" dataKey="name" tickLine={false} axisLine={false} width={118} tickFormatter={(v: string) => (v.length > 16 ? v.slice(0, 15) + '…' : v)} />
+                    <Tooltip content={<MoneyTooltip />} cursor={{ fill: 'rgba(124,58,237,0.06)' }} />
+                    <Legend iconType="circle" wrapperStyle={{ fontSize: 11 }} />
+                    <Bar dataKey="acumulado" name="Já separado" stackId="g" fill="#7C3AED" radius={[4, 0, 0, 4]} />
+                    <Bar dataKey="falta" name="Falta" stackId="g" fill="#DDD6FE" radius={[0, 4, 4, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+              <ul className="space-y-2 self-center">
+                {goalData.map((g) => (
+                  <li key={g.name} className="rounded-xl bg-tint/60 p-2.5">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="truncate text-xs font-semibold">{g.name}</span>
+                      <span className="text-xs font-bold text-brand dark:text-brand-soft">{g.pct}%</span>
+                    </div>
+                    <div className="mt-1.5"><Progress value={g.pct} height="h-1.5" /></div>
+                    <div className="mt-1 text-[11px] text-muted">{brl(g.acumulado)} de {brl(g.meta)}</div>
+                  </li>
+                ))}
+              </ul>
             </div>
           ) : <Empty>Cadastre metas para acompanhar o progresso.</Empty>}
         </Card>

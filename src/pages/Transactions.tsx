@@ -1,10 +1,10 @@
 import { useMemo, useState } from 'react';
-import { Pencil, Plus, Tag, Trash2 } from 'lucide-react';
+import { Check, Pencil, Plus, Tag, Trash2 } from 'lucide-react';
 import { useApp } from '../store';
 import { STATUS_LABEL, TX_LABEL, type Transaction, type TxStatus, type TxType } from '../lib/types';
 import { categoryName, topCategory } from '../lib/selectors';
-import { classifyTx, deleteTransaction } from '../lib/ops';
-import { brl } from '../lib/utils';
+import { classifyTx, confirmPendingTx, deleteTransaction } from '../lib/ops';
+import { brl, fmtDate } from '../lib/utils';
 import { Card, CategorySelect, Empty, Field, Modal, PageHeader } from '../components/ui';
 import { TxItem } from '../components/TxItem';
 import { TransactionForm } from '../components/TransactionForm';
@@ -52,6 +52,15 @@ export default function Transactions() {
     if (ok) commit((s) => deleteTransaction(s, t.id), 'Lançamento excluído e saldos recalculados.');
   };
 
+  const confirmOne = async (t: Transaction) => {
+    const ok = await confirm({
+      title: 'Confirmar lançamento pendente?',
+      message: `“${t.description}” — ${brl(t.amount)} (${fmtDate(t.date)}). Ao confirmar, o valor passa a movimentar o saldo da conta e o patrimônio.`,
+      confirmLabel: 'Confirmar lançamento',
+    });
+    if (ok) commit((s) => confirmPendingTx(s, t.id), 'Lançamento confirmado — saldos atualizados.');
+  };
+
   const sel = (k: keyof typeof f, v: string) => { setF({ ...f, [k]: v }); setLimit(60); };
   const months = ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12'];
   const mNames = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
@@ -92,6 +101,7 @@ export default function Transactions() {
           <div className="divide-y divide-line">
             {rows.slice(0, limit).map((t) => (
               <TxItem key={t.id} state={state} t={t} actions={<>
+                {t.status === 'pending' && <button className="btn-soft btn-sm" onClick={() => confirmOne(t)}><Check className="h-3.5 w-3.5" />Confirmar</button>}
                 {t.status === 'to_classify' && (t.type === 'income' || t.type === 'expense') && <button className="btn-soft btn-sm" onClick={() => setClassify(t)}><Tag className="h-3.5 w-3.5" />Classificar</button>}
                 <button className="btn-ghost btn-sm" onClick={() => setForm({ tx: t })} aria-label="Editar"><Pencil className="h-3.5 w-3.5" /></button>
                 <button className="btn-danger btn-sm" onClick={() => remove(t)} aria-label="Excluir"><Trash2 className="h-3.5 w-3.5" /></button>

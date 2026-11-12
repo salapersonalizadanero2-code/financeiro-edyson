@@ -2,9 +2,9 @@ import { useMemo, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { AlertTriangle, CheckCircle2, FileDown, Printer } from 'lucide-react';
 import { useApp } from '../store';
-import { TX_LABEL, STATUS_LABEL } from '../lib/types';
-import { categoryName, debtTotals, monthStats, obligationProgress, patrimonySeries, periodStats, statementCheck } from '../lib/selectors';
-import { addMonthsYM, brl, download, fmtDate, monthLong, monthShort, pct, toCSV } from '../lib/utils';
+import { KIND_LABEL, STATUS_LABEL, TX_LABEL } from '../lib/types';
+import { blockedOf, categoryName, computeTotals, debtTotals, monthStats, obligationProgress, patrimonySeries, periodStats, statementCheck } from '../lib/selectors';
+import { addMonthsYM, brl, download, fmtDate, monthLong, monthRange, monthShort, pct, toCSV } from '../lib/utils';
 import { accName, routeLabel } from '../components/TxItem';
 import { Badge, CHART_COLORS, Card, Empty, MoneyTooltip, Notice, PageHeader, Stat } from '../components/ui';
 
@@ -12,7 +12,8 @@ export default function Reports() {
   const { state, today, ym } = useApp();
   const [mode, setMode] = useState<'month' | 'year'>('month');
   const year = ym.slice(0, 4);
-  const [from, to, title] = mode === 'month' ? [`${ym}-01`, `${ym}-31`, monthLong(ym)] : [`${year}-01-01`, `${year}-12-31`, `ano de ${year}`];
+  const [from, to] = mode === 'month' ? monthRange(ym) : [`${year}-01-01`, `${year}-12-31`];
+  const title = mode === 'month' ? monthLong(ym) : `ano de ${year}`;
   const stats = useMemo(() => periodStats(state, from, to), [state, from, to]);
   const prev = useMemo(() => monthStats(state, addMonthsYM(ym, -1)), [state, ym]);
   const yearSeries = useMemo(() => Array.from({ length: 12 }, (_, i) => {
@@ -35,8 +36,13 @@ export default function Reports() {
     download(`lancamentos-${today}.csv`, toCSV(rows), 'text/csv;charset=utf-8');
   };
   const exportAccountsCSV = () => {
-    const rows: unknown[][] = [['Conta', 'Instituição', 'Saldo de referência']];
-    state.accounts.forEach((a) => rows.push([a.name, a.institution, a.openingBalance.toFixed(2).replace('.', ',')]));
+    const rows: unknown[][] = [['Conta', 'Instituição', 'Tipo', 'Saldo de referência', 'Saldo atual', 'Disponível', 'Bloqueado']];
+    const balances = computeTotals(state, today).balances;
+    state.accounts.forEach((a) => {
+      const bal = balances[a.id] ?? 0;
+      const blocked = blockedOf(a, bal, today);
+      rows.push([a.name, a.institution, KIND_LABEL[a.kind], a.openingBalance.toFixed(2).replace('.', ','), bal.toFixed(2).replace('.', ','), (bal - blocked).toFixed(2).replace('.', ','), blocked.toFixed(2).replace('.', ',')]);
+    });
     download(`contas-${today}.csv`, toCSV(rows), 'text/csv;charset=utf-8');
   };
   const exportJSON = () => {
@@ -54,11 +60,17 @@ export default function Reports() {
           <div className="flex rounded-xl border border-line bg-card p-0.5">
             {(['month', 'year'] as const).map((m) => <button key={m} onClick={() => setMode(m)} className={`cursor-pointer rounded-lg px-3 py-1.5 text-sm font-semibold ${mode === m ? 'bg-brand text-white' : 'text-muted'}`}>{m === 'month' ? 'Mensal' : 'Anual'}</button>)}
           </div>
-          <button className="btn-ghost" onClick={exportCSV}><FileDown className="h-4 w-4" />CSV</button>
+          <button className="btn-ghost" onClick={exportCSV} title="Exporta todos os lançamentos em CSV"><FileDown className="h-4 w-4" />CSV lançamentos</button>
+          <button className="btn-ghost" onClick={exportAccountsCSV} title="Exporta as contas e os saldos atuais em CSV"><FileDown className="h-4 w-4" />CSV contas</button>
           <button className="btn-ghost" onClick={exportJSON}><FileDown className="h-4 w-4" />JSON</button>
           <button className="btn-primary" onClick={() => window.print()}><Printer className="h-4 w-4" />Imprimir / PDF</button>
         </>}
       />
+
+      <div className="mb-4 hidden print:block">
+        <div className="text-lg font-bold">Relatório financeiro — {title}</div>
+        <div className="text-xs">Gerado em {fmtDate(today)} · dados salvos neste navegador</div>
+      </div>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Total de receitas" value={brl(stats.income)} tone="ok" sub={stats.toClassify > 0 ? `${brl(stats.toClassify)} a classificar` : undefined} />
@@ -99,22 +111,26 @@ export default function Reports() {
 
         {mode === 'month' && (
           <Card title={`${monthLong(ym)} × ${monthLong(addMonthsYM(ym, -1))}`}>
-            <table className="w-full text-sm">
-              <thead><tr className="text-left text-xs text-muted"><th className="py-1">Item</th><th className="text-right">Atual</th><th className="text-right">Anterior</th><th className="text-right">Variação</th></tr></thead>
-              <tbody className="divide-y divide-line">
-                {([['Receitas', stats.income, prev.income], ['Despesas', stats.expense, prev.expense], ['Investido', stats.invested, prev.invested], ['Resgatado', stats.redeemed, prev.redeemed], ['Transferências', stats.transfers, prev.transfers]] as const).map(([k, a, b]) => (
-                  <tr key={k}><td className="py-2">{k}</td><td className="text-right tabular-nums">{brl(a)}</td><td className="text-right tabular-nums text-muted">{brl(b)}</td><td className="text-right font-semibold">{delta(a, b)}</td></tr>
-                ))}
-              </tbody>
-            </table>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[26rem] text-sm">
+                <thead><tr className="text-left text-xs text-muted"><th className="py-1">Item</th><th className="text-right">Atual</th><th className="text-right">Anterior</th><th className="text-right">Variação</th></tr></thead>
+                <tbody className="divide-y divide-line">
+                  {([['Receitas', stats.income, prev.income], ['Despesas', stats.expense, prev.expense], ['Investido', stats.invested, prev.invested], ['Resgatado', stats.redeemed, prev.redeemed], ['Transferências', stats.transfers, prev.transfers]] as const).map(([k, a, b]) => (
+                    <tr key={k}><td className="py-2">{k}</td><td className="text-right tabular-nums">{brl(a)}</td><td className="text-right tabular-nums text-muted">{brl(b)}</td><td className="text-right font-semibold">{delta(a, b)}</td></tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </Card>
         )}
 
         <Card title="Evolução do patrimônio" className={mode === 'month' ? '' : 'lg:col-span-2'}>
-          <table className="w-full text-sm">
-            <thead><tr className="text-left text-xs text-muted"><th className="py-1">Mês</th><th className="text-right">Patrimônio ao fim do mês</th></tr></thead>
-            <tbody className="divide-y divide-line">{pat.map((p) => <tr key={p.ym}><td className="py-2 capitalize">{monthLong(p.ym)}</td><td className="text-right font-semibold tabular-nums">{brl(p.patrimonio)}</td></tr>)}</tbody>
-          </table>
+          <div className="max-h-72 overflow-auto">
+            <table className="w-full text-sm">
+              <thead><tr className="text-left text-xs text-muted"><th className="py-1">Mês</th><th className="text-right">Patrimônio ao fim do mês</th></tr></thead>
+              <tbody className="divide-y divide-line">{pat.map((p) => <tr key={p.ym}><td className="py-2 capitalize">{monthLong(p.ym)}</td><td className="text-right font-semibold tabular-nums">{brl(p.patrimonio)}</td></tr>)}</tbody>
+            </table>
+          </div>
           <p className="mt-2 text-[11px] text-muted">Parte do saldo de referência em {fmtDate(state.openingDate)}; só lançamentos reais (receitas, despesas e ajustes) alteram o patrimônio.</p>
         </Card>
       </div>

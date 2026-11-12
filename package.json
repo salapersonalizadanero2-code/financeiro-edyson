@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:single": "node scripts/build-single.mjs",
+    "test": "node scripts/run-selftests.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

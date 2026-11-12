@@ -106,7 +106,7 @@ export default function Accounts() {
           ) : <Empty>Sem movimentações nesta conta.</Empty>}
         </Modal>
       )}
-      {transfer && <TransactionForm presetType="transfer" onClose={() => setTransfer(false)} />}
+      {transfer && <TransactionForm presetType="transfer" preset={{ description: 'Transferência entre minhas contas' }} onClose={() => setTransfer(false)} />}
     </div>
   );
 }

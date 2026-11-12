@@ -74,6 +74,7 @@ body {
 .recharts-cartesian-grid line { stroke: var(--line); }
 
 @media print {
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .no-print { display: none !important; }
   body { background: #fff !important; color: #000 !important; }
   .card { box-shadow: none !important; break-inside: avoid; }
